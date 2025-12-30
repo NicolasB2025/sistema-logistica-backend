@@ -1,17 +1,42 @@
 from flask import Flask, request, send_file
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import pandas as pd
 import math
 import tempfile
 from openpyxl import load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side
+import os
 
 app = Flask(__name__)
-CORS(app)
 
-@app.route("/gerar_excel", methods=["POST"])
+# ==============================
+# ✅ CORS DEFINITIVO (PRODUÇÃO)
+# ==============================
+CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=True,
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "OPTIONS"]
+)
+
+@app.route("/")
+def home():
+    return "Backend online"
+
+# =========================================
+# ✅ ROTA COM PRE-FLIGHT (OPTIONS) LIBERADO
+# =========================================
+@app.route("/gerar_excel", methods=["POST", "OPTIONS"])
+@cross_origin()
 def gerar_excel():
+
+    # 🔹 Se for apenas preflight (OPTIONS), responde vazio
+    if request.method == "OPTIONS":
+        return "", 204
+
     data = request.json
+
     dados = data["dados"]
     motoboys = data["motoboys"]
     entregas = data["entregas"]
@@ -29,7 +54,6 @@ def gerar_excel():
         for e in ent:
             km_real = float(e["km"])
 
-            # 🔴 REGRA FINAL: só conta km COMPLETO acima do limite
             exc_moto = math.floor(km_real - dados["kmm"])
             exc_cliente = math.floor(km_real - dados["kmc"])
 
@@ -38,15 +62,12 @@ def gerar_excel():
             if exc_cliente > 0:
                 soma_km_exc_cliente += exc_cliente
 
-        # TAXAS
         taxa_motoboy = (qtd_entregas * dados["tm"]) + soma_km_exc_moto
         taxa_cliente = (qtd_entregas * dados["tc"]) + soma_km_exc_cliente
 
-        # DIÁRIAS
         diaria_moto = dados["dcoord"] if m["tipo"] == "Coordenação" else dados["dm"]
         diaria_cliente = dados["dc"]
 
-        # CHUVA
         aplica_chuva = m["aplica_chuva"] and qtd_entregas > 0
         chuva_moto = dados["chuva_moto"] if aplica_chuva else 0
         chuva_cliente = dados["chuva_cliente"] if aplica_chuva else 0
@@ -129,12 +150,19 @@ def gerar_excel():
 
     wb.save(tmp.name)
 
+    # ==============================
+    # ✅ ENVIO MOBILE-SAFE DO EXCEL
+    # ==============================
     return send_file(
         tmp.name,
-        as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=False,
         download_name="relatorio_logistica_final.xlsx"
     )
 
+# ==============================
+# ✅ START PARA RENDER
+# ==============================
 if __name__ == "__main__":
-    app.run(debug=True)
-
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
